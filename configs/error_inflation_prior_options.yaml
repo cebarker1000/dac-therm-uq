@@ -1,0 +1,65 @@
+# Error Inflation Prior Options
+# This file shows different prior choices for the error_inflation parameter
+
+# Option 1: Log-Normal Prior (Recommended)
+# - center: 1.0 (no inflation by default)
+# - sigma_log: 0.5 (allows ~0.6x to 1.6x inflation)
+# - Advantages: Natural for multiplicative factors, symmetric on log scale
+error_inflation_lognormal:
+  type: lognormal
+  center: 1.0
+  sigma_log: 0.5
+  description: "Error inflation factor (log-normal prior)"
+  units: "dimensionless"
+
+# Option 2: Conservative Log-Normal
+# - center: 1.0
+# - sigma_log: 0.3 (allows ~0.7x to 1.4x inflation)
+# - Use when you expect small deviations from baseline
+error_inflation_conservative:
+  type: lognormal
+  center: 1.0
+  sigma_log: 0.3
+  description: "Error inflation factor (conservative prior)"
+  units: "dimensionless"
+
+# Option 3: Wide Log-Normal
+# - center: 1.0
+# - sigma_log: 0.8 (allows ~0.4x to 2.5x inflation)
+# - Use when you expect significant model misspecification
+error_inflation_wide:
+  type: lognormal
+  center: 1.0
+  sigma_log: 0.8
+  description: "Error inflation factor (wide prior)"
+  units: "dimensionless"
+
+# Option 4: Gamma Prior (Alternative)
+# - shape: 2.0, scale: 0.5 (mean=1.0, std=0.7)
+# - Advantages: Always positive, can be more informative
+error_inflation_gamma:
+  type: gamma
+  shape: 2.0
+  scale: 0.5
+  description: "Error inflation factor (gamma prior)"
+  units: "dimensionless"
+
+# Option 5: Uniform Prior (Current)
+# - low: 0.1, high: 10.0
+# - Disadvantages: Not natural for multiplicative factors
+error_inflation_uniform:
+  type: uniform
+  low: 0.1
+  high: 10.0
+  description: "Error inflation factor (uniform prior)"
+  units: "dimensionless"
+
+# Prior Selection Guidelines:
+# 1. Log-normal is most natural for multiplicative factors
+# 2. Center at 1.0 (no inflation by default)
+# 3. Choose sigma_log based on expected inflation range:
+#    - 0.3: Conservative (±30% inflation)
+#    - 0.5: Moderate (±50% inflation) 
+#    - 0.8: Wide (±100% inflation)
+# 4. Consider your model's expected accuracy
+# 5. Test with synthetic data to validate prior choice 

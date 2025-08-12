@@ -1,0 +1,125 @@
+mats:
+  p_diam:
+    r: 20e-6      # radius (m)
+    z: 30e-06    # thickness (m)
+    rho_cv: 1781500
+    k: 2000         # thermal conductivity (W/m/K)
+    mesh: 1.e-6 # mesh size (m)
+
+  p_ins:
+    r: 20e-6 
+    z: 4e-06 
+    rho_cv: 2621310   
+    k: 0.001
+    mesh: 0.05e-6 
+  
+  sample:
+    r: 20e-6
+    z: 2.9e-06
+    rho_cv: 7072500
+    k: 40
+    mesh: 0.04e-6
+
+  o_ins:  
+    r: 20e-6
+    z: 4.2e-06
+    rho_cv: 2621310
+    k: 0.001
+    mesh: 0.05e-6
+
+  o_diam:
+    r: 20e-6      # radius (m)
+    z: 30e-06    # thickness (m)
+    rho_cv: 1781500
+    k: 2000         # thermal conductivity (W/m/K)
+    mesh: 1.e-6 # mesh size (m)
+
+# Material layout (agnostic to material names)
+layout:
+  materials: [p_diam, p_ins, sample, o_ins, o_diam]
+
+# Timing parameters
+timing:
+  t_final: 8.5e-6  # final time (s)
+  num_steps: 50    # number of time steps
+
+# Heating configuration
+heating:
+  ic_temp: 300.0   # initial temperature (K)
+  fwhm: 7.0e-06     # full width at half maximum (m)
+  file: "data/experimental/edmund_71Gpa_run2.csv"
+  ma_window_pts: 10
+  
+  # Savitzky-Golay smoothing configuration
+  smoothing:
+    enabled: true
+    window_length: 11  # Must be odd number, smaller than data length
+    polyorder: 3       # Polynomial order (typically 2-4)
+  
+  # Boundary condition configuration
+  bc:
+    type: "gaussian"
+    location: "zmin"
+    material: "sample"  # Specify which material to apply heating to
+    center: 0.0
+
+# Boundary conditions (agnostic to material names)
+boundary_conditions:
+  outer:
+    left:
+      type: "dirichlet"
+      value: "ic_temp"
+    right:
+      type: "dirichlet" 
+      value: "ic_temp"
+    top:
+      type: "dirichlet"
+      value: "ic_temp"
+
+# Solver configuration
+solver:
+  type: "direct"
+  direct:
+    factorization: "mumps"
+
+# Output configuration
+output:
+  xdmf:
+    enabled: true
+    filename: "output.xdmf"
+  
+  watcher_points:
+    enabled: true
+    filename: "watcher_points.csv"
+    points:
+      pside:
+        material: "p_ins"
+        position: "heating_location"  # Automatically place at heating BC location
+      
+      oside:
+        material: "sample"
+        position:
+          r: 0.0
+          percentage: 1.0
+      
+  
+  # Analysis and plotting options
+  analysis:
+    enabled: true
+    plot_temperature_curves: true
+    calculate_rmse: true
+    experimental_data_file: "data/experimental/edmund_71Gpa_run1.csv"
+
+# Performance settings
+performance:
+  progress_reporting:
+    enabled: true
+    interval: 10
+  visualize_mesh: false 
+
+# IO configuration
+io:
+  mesh_path: "meshes/edmund"
+
+# Material tags (for mesh caching)
+material_tags: {}

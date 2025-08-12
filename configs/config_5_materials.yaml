@@ -1,0 +1,124 @@
+# Heat flow simulation configuration
+# Optimized for performance and configurability
+
+# Material properties and layout
+mats:
+  p_ins:
+    r: 20e-6      # radius (m)
+    z: 3.2e-06    # thickness (m)
+    rho_cv: 2764828
+    k: 10         # thermal conductivity (W/m/K)
+    mesh: 0.05e-6 # mesh size (m)
+  
+  p_coupler:
+    r: 20e-6
+    z: 6.2e-08
+    rho_cv: 3445520  # 26504 * 130
+    k: 352
+    mesh: 0.02e-6
+
+  sample:
+    r: 20e-6
+    z: 1.84e-06
+    rho_cv: 5876632  # 5164 * 1158
+    k: 2
+    mesh: 0.04e-6
+  
+  o_coupler:
+    r: 20e-6
+    z: 6.2e-08
+    rho_cv: 3445520  # 26504 * 130
+    k: 352
+    mesh: 0.04e-6
+  
+  o_ins:
+    r: 20e-6
+    z: 6.3e-06
+    rho_cv: 2764828  # 4131 * 668
+    k: 10
+    mesh: 0.05e-6
+
+# Material layout
+layout:
+  materials: [p_ins, p_coupler, sample, o_coupler, o_ins]
+
+# Timing parameters
+timing:
+  t_final: 25.0e-6  # final time (s)
+  num_steps: 100    # number of time steps
+
+# Heating configuration
+heating:
+  ic_temp: 300.0   # initial temperature (K)
+  fwhm: 13.2e-06     # full width at half maximum (m)
+  file: "data/experimental/geballe_heat_data.csv"
+  
+  # Boundary condition configuration
+  bc:
+    type: "gaussian"
+    location: "zmin"
+    material: "p_coupler"  # Specify which material to apply heating to
+    center: 0.0
+
+# Boundary conditions (agnostic to material names)
+boundary_conditions:
+  outer:
+    left:
+      type: "dirichlet"
+      value: "ic_temp"
+    right:
+      type: "dirichlet" 
+      value: "ic_temp"
+    top:
+      type: "dirichlet"
+      value: "ic_temp"
+
+# Solver configuration
+solver:
+  type: "direct"
+  direct:
+    factorization: "mumps"
+
+# Output configuration
+output:
+  xdmf:
+    enabled: true
+    filename: "output.xdmf"
+  
+  watcher_points:
+    enabled: true
+    filename: "watcher_points.csv"
+    points:
+      pside:
+        material: "p_ins"
+        position:
+          r: 0.0      # Specific r-value in meters
+          percentage: 1.0  # Left edge of material (0.0 = leftmost, 1.0 = rightmost)
+      
+      oside:
+        material: "o_coupler"
+        position:
+          r: 0.0
+          percentage: 0.5
+  
+  # Analysis and plotting options
+  analysis:
+    enabled: true
+    plot_temperature_curves: true
+    calculate_rmse: true
+    experimental_data_file: "data/experimental/geballe_heat_data.csv"
+
+# Performance settings
+performance:
+  progress_reporting:
+    enabled: true
+    interval: 10
+  visualize_mesh: true 
+
+# IO configuration
+io:
+  mesh_path: "meshes/no_diamond"
+
+# Material tags (for mesh caching)
+material_tags: {}
+

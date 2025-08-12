@@ -1,0 +1,120 @@
+# Parameter distributions configuration
+# This file centralizes all parameter definitions to avoid discrepancies between different scripts
+
+# Distribution types supported:
+# - lognormal: uses center (geometric mean) and sigma_log (log standard deviation)
+# - normal: uses center (mean) and sigma (standard deviation)  
+# - uniform: uses low and high bounds
+
+parameters:
+  d_sample:
+    type: normal
+    center: 2.9e-6
+    sigma: 0.1e-6
+    description: "Sample thickness"
+    units: "m"
+    
+  rho_cv_sample:
+    type: normal
+    center: 7072500
+    sigma: 7072
+    description: "Sample volumetric heat capacity"
+    units: "J/(m³·K)"
+
+  rho_cv_ins:
+    type: normal
+    center: 2621310
+    sigma: 26213
+    description: "Insulator volumetric heat capacity"
+    units: "J/(m³·K)"
+
+  d_ins_pside:
+    type: normal
+    center: 4.0e-6
+    sigma: 0.3e-6
+    description: "P-side insulator thickness"
+    units: "m"
+    
+  d_ins_oside:
+    type: normal
+    center: 4.2e-6
+    sigma: 0.3e-6
+    description: "O-side insulator thickness"
+    units: "m"
+    
+  fwhm:
+    type: normal
+    center: 7.0e-6
+    sigma: 0.1e-6
+    description: "Full width at half maximum of heating pulse"
+    units: "m"
+    
+  k_sample:
+    type: uniform
+    low: 25.0
+    high: 100.0
+    description: "Sample thermal conductivity"
+    units: "W/(m·K)"
+    
+  k_ins:
+    type: uniform
+    low: 1
+    high: 30
+    description: "Insulator thermal conductivity"
+    units: "W/(m·K)"
+
+  k_int:
+    type: uniform 
+    low: 1
+    high: 500
+    description: "Interface thermal conductivity"
+    units: "W/(m·K)"
+
+# Parameter mapping to config structure
+# Each parameter can map to multiple locations in the simulation config
+parameter_mapping:
+  d_sample:
+    - ["mats", "sample", "z"]
+    
+  rho_cv_sample:
+    - ["mats", "sample", "rho_cv"]
+    
+  rho_cv_ins:
+    - ["mats", "p_ins", "rho_cv"]
+    - ["mats", "o_ins", "rho_cv"]
+    
+  d_ins_oside:
+    - ["mats", "o_ins", "z"]
+    
+  d_ins_pside:
+    - ["mats", "p_ins", "z"]
+    
+  fwhm:
+    - ["heating", "fwhm"]
+    
+  k_sample:
+    - ["mats", "sample", "k"]
+    
+  k_ins:
+    - ["mats", "p_ins", "k"]
+    - ["mats", "o_ins", "k"]
+
+  k_int:
+    - ["mats", "p_int", "k"]
+    - ["mats", "o_int", "k"]
+
+# Sampling configuration
+sampling:
+  method: "latin_hypercube"
+  n_samples: 300
+  random_seed: 42  # Set to an integer for reproducible results
+
+# Output configuration
+output:
+  save_samples: true
+  samples_file: "outputs/edmund1/initial_train_set_int_ins_match.csv"
+  results_file: "outputs/edmund1/uq_batch_results_int_ins_match.npz"
+  fpca_model_file: "outputs/edmund1/fpca_model_int_ins_match.npz"
+  fpca_training_file: "outputs/edmund1/training_data_fpca_int_ins_match.npz"
+  distribution_plot_file: "outputs/edmund1/parameter_distributions_int_ins_match.png"
+  correlation_plot_file: "outputs/parameter_correlations.png"  
