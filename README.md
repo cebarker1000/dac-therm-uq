@@ -1,18 +1,6 @@
-# Heat Flow Simulation and Uncertainty Quantification
-
-This repository contains a suite of scripts for running heat flow simulations
-and performing uncertainty quantification (UQ) analysis. The codebase is
-designed to be modular and configurable, allowing for easy extension to new
-datasets and analysis methods.
-
-## Getting Started
-
-To get started with this project, you will need to have Python 3.8+ and the
-required dependencies installed.
-
 ### Dependencies
 
-The following Python packages are required to run the simulations and
+The following Python packages are required
 analyses:
 
 - `numpy`
@@ -30,13 +18,6 @@ analyses:
 - `corner`
 - `UQpy`
 - `scikit-learn`
-
-You can install these packages using pip:
-
-```bash
-pip install numpy pandas scipy matplotlib seaborn pyyaml dolfinx ufl petsc4py gmsh meshio arviz corner UQpy scikit-learn
-```
-
 ### Running the Main Workflows
 
 The two main workflows in this project are running a single simulation and
@@ -105,7 +86,7 @@ purpose:
 - `train_surrogate_models.py`: Trains a surrogate model from the generated
   training data.
 - `uqpy_MCMC.py`: Performs MCMC-based parameter estimation and UQ.
-- `uqpy_ls.py`: Performs least-squares-based parameter estimation and UQ.
+- `uqpy_ls.py`: Performs least-squares-based parameter estimation.
 
 ### Analysis and Plotting
 
