@@ -9,7 +9,9 @@ mesh for every call) and the same plotting utilities as `run_and_compare_simulat
 Usage
 -----
 python compare_single_parameter_set.py <config_yaml> \
-       --surrogate outputs/full_surrogate_model.pkl
+       --surrogate outputs/full_surrogate_model.pkl \
+       --distributions outputs/tyler_11_16/distributions_edmund135_1.yaml \
+       --output-dir outputs
 
 The YAML file specifies the material thicknesses / properties exactly like in
 `run_and_compare_simulation.py`.
@@ -20,18 +22,11 @@ import os
 from typing import Dict, Any
 
 import numpy as np
+import yaml
 from analysis.uq_wrapper import run_single_simulation, load_recast_training_data
 from train_surrogate_models import FullSurrogateModel
 from run_and_compare_simulation import SimulationComparer  # reuse plotting & helpers
 from analysis.config_utils import get_param_defs_from_config, get_param_mapping_from_config
-
-
-# -----------------------------------------------------------------------------
-# Load parameter definitions and mapping from config file
-# -----------------------------------------------------------------------------
-param_defs = get_param_defs_from_config()
-param_mapping = get_param_mapping_from_config()
-param_names = [p["name"] for p in param_defs]
 
 # -----------------------------------------------------------------------------
 # Helper: extract parameters from YAML config (reuse logic from SimulationComparer)
@@ -75,7 +70,16 @@ def main():
     parser = argparse.ArgumentParser(description="Compare surrogate vs minimal simulation for one parameter set")
     parser.add_argument("config_file", help="YAML config defining parameter values")
     parser.add_argument("--surrogate", default="outputs/full_surrogate_model.pkl", help="Path to saved surrogate model")
+    parser.add_argument("--distributions", default="configs/distributions.yaml", help="Path to distributions YAML config file")
+    parser.add_argument("--output-dir", default="outputs", help="Directory to save output plot (default: outputs)")
     args = parser.parse_args()
+
+    # ---------------------------------------------------------------------
+    # Load parameter definitions and mapping from distributions config
+    # ---------------------------------------------------------------------
+    param_defs = get_param_defs_from_config(args.distributions)
+    param_mapping = get_param_mapping_from_config(args.distributions)
+    param_names = [p["name"] for p in param_defs]
 
     # ---------------------------------------------------------------------
     # Load surrogate and helper comparer (for plotting utilities)
@@ -86,15 +90,22 @@ def main():
     # ---------------------------------------------------------------------
     # Build parameter dictionary & vector
     # ---------------------------------------------------------------------
-    import yaml
     with open(args.config_file, "r") as f:
         cfg = yaml.safe_load(f)
     params_dict = extract_params_from_config(cfg)
     
     # Debug: print parameter values
     print("\nDEBUG: Parameter values from config file:")
+    missing_params = []
     for name in param_names:
-        print(f"  {name}: {params_dict[name]}")
+        if name in params_dict:
+            print(f"  {name}: {params_dict[name]}")
+        else:
+            print(f"  {name}: <missing>")
+            missing_params.append(name)
+    
+    if missing_params:
+        raise ValueError(f"Missing required parameters in config file: {missing_params}")
     
     sample_vec = np.array([params_dict[name] for name in param_names])
 
@@ -137,18 +148,8 @@ def main():
         exp_temp=exp_temp,
         exp_oside=exp_oside,
         params=params_dict,
+        output_dir=args.output_dir,
     )
-
-    # use the default parameter values just once
-    param_sample = np.array([p['center'] if 'center' in p else (p['low']+p['high'])/2
-                            for p in param_defs])          # param_defs already in namespace
-    res = run_single_simulation(param_sample, param_defs, param_mapping,
-                                suppress_print=True)
-
-    watch = res['watcher_data']['oside']
-    print("raw length:", len(watch['raw']))
-    print("first 5 times :", watch['time'][:5])
-    print("first 5 temps :", watch['raw'][:5])
 
 
 if __name__ == "__main__":

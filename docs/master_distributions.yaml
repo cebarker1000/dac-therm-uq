@@ -1,0 +1,165 @@
+# MASTER distributions.yaml for UQpy-based workflows
+#
+# This file documents all supported fields for parameter priors and how they
+# are consumed by the codebase. It is intended as a reference and template
+# for inputs to training (Latin Hypercube sampling) and MCMC (UQpy Stretch).
+#
+# IMPORTANT
+# - Parameter ORDER matters: the order in `parameters:` determines the
+#   parameter vector order used by the surrogate and MCMC.
+# - Types supported by the code: lognormal | normal | uniform.
+
+# ---------------------------------------------------------------------------
+# Parameter prior definitions (READ by both training and MCMC)
+# ---------------------------------------------------------------------------
+parameters:
+  # Each entry defines one model parameter. The KEY is the parameter name and
+  # is used everywhere (MCMC labels, surrogate order, mapping to sim config).
+  #
+  # For lognormal: use `center` (geometric mean) and `sigma_log` (log std-dev)
+  # → UQpy: Lognormal(s=sigma_log, scale=center)
+  d_sample:
+    type: lognormal        # required: lognormal | normal | uniform
+    center: 1.84e-6        # required for lognormal/normal
+    sigma_log: 0.079       # required for lognormal
+    # description/units are optional and ignored by code (for humans only):
+    description: "Sample thickness"
+    units: "m"
+
+  rho_cv_sample:
+    type: lognormal
+    center: 5.879912e6
+    sigma_log: 0.079
+    description: "Sample volumetric heat capacity"
+    units: "J/(m^3·K)"
+
+  rho_cv_coupler:
+    type: lognormal
+    center: 3.44552e6
+    sigma_log: 0.079
+
+  rho_cv_ins:
+    type: lognormal
+    center: 2.759508e6
+    sigma_log: 0.079
+
+  d_coupler:
+    type: lognormal
+    center: 6.2e-8
+    sigma_log: 0.204
+
+  d_ins_pside:
+    type: lognormal
+    center: 3.2e-6
+    sigma_log: 0.001
+
+  d_ins_oside:
+    type: lognormal
+    center: 6.3e-6
+    sigma_log: 0.001
+
+  fwhm:
+    type: lognormal
+    center: 13.2e-6
+    sigma_log: 0.041
+    description: "Heating Gaussian FWHM"
+    units: "m"
+
+  # Conductivities (typically treated as free parameters with uniform priors)
+  k_sample:
+    type: uniform          # required for uniform
+    low: 1.0               # required for uniform
+    high: 10.0
+    units: "W/(m·K)"
+
+  k_ins:
+    type: uniform
+    low: 3.0
+    high: 30.0
+
+  k_coupler:
+    type: uniform
+    low: 10.0
+    high: 1000.0
+
+  # Optional: error inflation factor in the likelihood model (MCMC only)
+  # If present with any valid prior, uqpy_MCMC will include it as an extra
+  # sampled parameter and multiply the observation variance by this factor.
+  # error_inflation:
+  #   type: lognormal
+  #   center: 1.0
+  #   sigma_log: 0.3
+
+# ---------------------------------------------------------------------------
+# Parameter to Simulation-config mapping (READ by training/batch sims only)
+# ---------------------------------------------------------------------------
+# Used to project a parameter vector back into a simulation YAML when
+# generating training data (analysis/uq_wrapper.py). Not used by uqpy_MCMC.
+parameter_mapping:
+  d_sample:
+    - ["mats", "sample", "z"]
+  rho_cv_sample:
+    - ["mats", "sample", "rho_cv"]
+  rho_cv_coupler:
+    - ["mats", "p_coupler", "rho_cv"]
+    - ["mats", "o_coupler", "rho_cv"]
+  rho_cv_ins:
+    - ["mats", "p_ins", "rho_cv"]
+    - ["mats", "o_ins", "rho_cv"]
+  d_coupler:
+    - ["mats", "p_coupler", "z"]
+    - ["mats", "o_coupler", "z"]
+  d_ins_pside:
+    - ["mats", "p_ins", "z"]
+  d_ins_oside:
+    - ["mats", "o_ins", "z"]
+  fwhm:
+    - ["heating", "fwhm"]
+  k_sample:
+    - ["mats", "sample", "k"]
+  k_ins:
+    - ["mats", "p_ins", "k"]
+    - ["mats", "o_ins", "k"]
+  k_coupler:
+    - ["mats", "p_coupler", "k"]
+    - ["mats", "o_coupler", "k"]
+  # error_inflation:  # not applied to sim configs; omitted on purpose
+
+# ---------------------------------------------------------------------------
+# Sampling configuration (READ by training only)
+# ---------------------------------------------------------------------------
+sampling:
+  # n_samples is used by generate_training_data.py for LHS size.
+  n_samples: 200
+
+# ---------------------------------------------------------------------------
+# Output paths for training artifacts (READ by training only)
+# ---------------------------------------------------------------------------
+output:
+  save_samples: true
+  samples_file: "outputs/initial_train_set.csv"
+  results_file: "outputs/uq_batch_results.npz"
+  fpca_model_file: "outputs/fpca_model.npz"
+  fpca_training_file: "outputs/training_data_fpca.npz"
+  distribution_plot_file: "outputs/parameter_distributions.png"
+  correlation_plot_file: "outputs/parameter_correlations.png"
+
+# ---------------------------------------------------------------------------
+# Notes and caveats
+# ---------------------------------------------------------------------------
+# - The MCMC script (uqpy_MCMC.py) ONLY reads `parameters` to build the prior.
+#   It ignores `parameter_mapping`, `sampling`, and `output`.
+# - The training pipeline (generate_training_data.py) reads all sections:
+#     parameters → create UQpy marginals
+#     parameter_mapping → inject sample values into sim config
+#     sampling.n_samples → number of LHS samples
+#     output → file destinations for saved artifacts
+# - Optional descriptive fields (`description`, `units`) are ignored by code.
+# - Parameter order is preserved and defines the vector layout used everywhere.
+# - Supported distribution keys used by the code:
+#     lognormal: center, sigma_log
+#     normal:    center, sigma
+#     uniform:   low, high
+# - Unknown keys are ignored; prefer removing them to avoid confusion.
+
+

@@ -33,8 +33,14 @@ class SimulationComparer:
         self.sim_t_final = self.surrogate.t_final
         self.sim_num_steps = self.surrogate.num_steps
 
-        # Experimental file (hard-coded as in original script)
-        self.geballe_file = "data/experimental/geballe_heat_data.csv"
+        # Experimental file: try to get from config, fallback to default
+        if "heating" in self.config and "file" in self.config["heating"]:
+            self.experimental_file = self.config["heating"]["file"]
+        elif "output" in self.config and "analysis" in self.config["output"] and "experimental_data_file" in self.config["output"]["analysis"]:
+            self.experimental_file = self.config["output"]["analysis"]["experimental_data_file"]
+        else:
+            # Fallback to default (hard-coded as in original script)
+            self.experimental_file = "data/experimental/geballe_heat_data.csv"
 
     # ------------------------------------------------------------------
     # Parameter helpers
@@ -90,7 +96,7 @@ class SimulationComparer:
     # Experimental data utilities
     # ------------------------------------------------------------------
     def load_experimental_data(self):
-        data = np.genfromtxt(self.geballe_file, delimiter=",", names=True)
+        data = np.genfromtxt(self.experimental_file, delimiter=",", names=True)
         return data["time"], data["temp"], data["oside"]
 
     def align_experimental_data(self, exp_time, exp_data, method="linear"):
@@ -104,7 +110,7 @@ class SimulationComparer:
     def create_comparison_plot(self, *, sim_results: Dict[str, Any], surrogate_curve: np.ndarray,
                                curve_uncert: np.ndarray | None = None,
                                exp_time: np.ndarray, exp_temp: np.ndarray, exp_oside: np.ndarray,
-                               params: Dict[str, float]):
+                               params: Dict[str, float], output_dir: str = "outputs"):
         if "oside_temps" not in sim_results:
             raise ValueError("sim_results must contain 'oside_temps' (normalised) and 'time_grid'.")
 
@@ -152,7 +158,12 @@ class SimulationComparer:
                      f"  max σ={curve_uncert[idx_max]:.3f}",
                      va="bottom", ha="left", fontsize=8)
 
-        out = f"outputs/comparison_{os.path.splitext(os.path.basename(self.config_file))[0]}.png"
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate output filename
+        config_basename = os.path.splitext(os.path.basename(self.config_file))[0]
+        out = os.path.join(output_dir, f"comparison_{config_basename}.png")
         plt.savefig(out, dpi=200)
         print(f"Comparison plot saved to {out}\nRMSE Sim={rmse_sim:.4f} | Surrogate={rmse_sur:.4f}")
 

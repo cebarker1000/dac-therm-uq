@@ -1,0 +1,142 @@
+# Parameter distributions configuration
+# This file centralizes all parameter definitions to avoid discrepancies between different scripts
+
+# Distribution types supported:
+# - lognormal: uses center (geometric mean) and sigma_log (log standard deviation)
+# - normal: uses center (mean) and sigma (standard deviation)  
+# - uniform: uses low and high bounds
+
+parameters:
+  d_sample:
+    type: lognormal
+    center: 1.84e-6
+    sigma_log: 0.079
+    description: "Sample thickness"
+    units: "m"
+    
+  rho_cv_sample:
+    type: lognormal
+    center: 5979912
+    sigma_log: 0.079
+    description: "Sample volumetric heat capacity"
+    units: "J/(m³·K)"
+    
+  rho_cv_coupler:
+    type: lognormal
+    center: 3445520
+    sigma_log: 0.079
+    description: "Coupler volumetric heat capacity"
+    units: "J/(m³·K)"
+    
+  rho_cv_ins:
+    type: lognormal
+    center: 2759508
+    sigma_log: 0.079
+    description: "Insulator volumetric heat capacity"
+    units: "J/(m³·K)"
+    
+  d_coupler:
+    type: lognormal
+    center: 6.2e-8
+    sigma_log: 0.204
+    description: "Coupler thickness"
+    units: "m"
+    
+  d_ins_pside:
+    type: lognormal
+    center: 3.2e-6
+    sigma_log: 0.001
+    description: "P-side insulator thickness"
+    units: "m"
+    
+  d_ins_oside:
+    type: lognormal
+    center: 6.3e-6
+    sigma_log: 0.001
+    description: "O-side insulator thickness"
+    units: "m"
+    
+  fwhm:
+    type: lognormal
+    center: 13.2e-6
+    sigma_log: 0.041
+    description: "Full width at half maximum of heating pulse"
+    units: "m"
+    
+  k_sample:
+    type: uniform
+    low: 1.0
+    high: 10.0
+    description: "Sample thermal conductivity"
+    units: "W/(m·K)"
+    
+  k_ins:
+    type: uniform
+    low: 3.0
+    high: 30.0
+    description: "Insulator thermal conductivity"
+    units: "W/(m·K)"
+    
+  k_coupler:
+    type: uniform
+    low: 10.0
+    high: 1000.0
+    description: "Coupler thermal conductivity"
+    units: "W/(m·K)"
+
+# Parameter mapping to config structure
+# Each parameter can map to multiple locations in the simulation config
+parameter_mapping:
+  d_sample:
+    - ["mats", "sample", "z"]
+    
+  rho_cv_sample:
+    - ["mats", "sample", "rho_cv"]
+    
+  rho_cv_coupler:
+    - ["mats", "p_coupler", "rho_cv"]
+    - ["mats", "o_coupler", "rho_cv"]
+    
+  rho_cv_ins:
+    - ["mats", "p_ins", "rho_cv"]
+    - ["mats", "o_ins", "rho_cv"]
+    
+  d_coupler:
+    - ["mats", "p_coupler", "z"]
+    - ["mats", "o_coupler", "z"]
+    
+  d_ins_oside:
+    - ["mats", "o_ins", "z"]
+    
+  d_ins_pside:
+    - ["mats", "p_ins", "z"]
+    
+  fwhm:
+    - ["heating", "fwhm"]
+    
+  k_sample:
+    - ["mats", "sample", "k"]
+    
+  k_ins:
+    - ["mats", "p_ins", "k"]
+    - ["mats", "o_ins", "k"]
+    
+  k_coupler:
+    - ["mats", "p_coupler", "k"]
+    - ["mats", "o_coupler", "k"]
+
+# Sampling configuration
+sampling:
+  method: "latin_hypercube"
+  n_samples: 120
+  random_seed: 42  # Set to an integer for reproducible results
+
+# Output configuration
+output:
+  save_samples: true
+  samples_file: "outputs/geballe/geballe_80GPa_1/initial_train_set.csv"
+  results_file: "outputs/geballe/geballe_80GPa_1/uq_batch_results.npz"
+  fpca_model_file: "outputs/geballe/geballe_80GPa_1/fpca_model.npz"
+  fpca_training_file: "outputs/geballe/geballe_80GPa_1/training_data_fpca.npz"
+  distribution_plot_file: "outputs/geballe/geballe_80GPa_1/parameter_distributions.png"
+  correlation_plot_file: "outputs/geballe/geballe_80GPa_1/parameter_correlations.png"  

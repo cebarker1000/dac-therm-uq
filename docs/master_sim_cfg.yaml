@@ -1,0 +1,138 @@
+# MASTER CONFIG FOR run_simulation.py + core/simulation_engine.py
+
+
+# Optional name used by run_simulation.setup_paths() to build the output directory
+simulation_name: "my_simulation"  # optional; default: 'default_simulation' if omitted
+
+# -------------------------------------------------------------------
+# Materials and layout
+# -------------------------------------------------------------------
+mats:
+  # Material blocks are arbitrary names; must match entries in layout.materials
+  # Required per material keys: r, z, rho_cv, k, mesh
+  p_ins:
+    r: 20e-6          # [m] radial extent (used for overall mesh bounds)
+    z: 3.2e-6         # [m] thickness (used for stacking in z)
+    rho_cv: 2.764828e6  # [J/m^3/K] volumetric heat capacity (used in forms)
+    k: 10.0           # [W/m/K] thermal conductivity
+    mesh: 0.05e-6     # [m] target mesh size within this region
+  sample:
+    r: 20e-6
+    z: 1.84e-6
+    rho_cv: 5.876632e6
+    k: 3.8
+    mesh: 0.04e-6
+  o_ins:
+    r: 20e-6
+    z: 6.3e-6
+    rho_cv: 2.764828e6
+    k: 10.0
+    mesh: 0.05e-6
+
+layout:
+  # Order of materials stacked along z (sample is auto-centered if named with 'sample')
+  materials: [p_ins, sample, o_ins]
+
+# -------------------------------------------------------------------
+# Timing
+# -------------------------------------------------------------------
+timing:
+  t_final: 8.5e-6     # [s] final time used to compute dt
+  num_steps: 50       # number of time steps; used throughout
+
+# -------------------------------------------------------------------
+# Heating and initial condition
+# -------------------------------------------------------------------
+heating:
+  ic_temp: 300.0      # [K] initial temperature for u_n and for 'ic_temp' BC value resolution
+  fwhm: 12e-6         # [m] FWHM for the Gaussian boundary heating profile (used in exp coefficient)
+  file: "data/experimental/geballe_heat_data.csv"  # CSV with columns time,temp,(optional oside)
+  smoothing:
+    enabled: false    # if true, Savitzky-Golay smoothing is applied when loading 'file'
+    window_length: 11 # odd integer; auto-adjusted to data length if necessary
+    polyorder: 3
+
+  bc:
+    # Only type: 'gaussian' is implemented. Other types are ignored.
+    type: "gaussian"
+    # Where to apply the heating line in z: 'zmin' or 'zmax'. Other values default to 'zmin' with a warning.
+    location: "zmin"
+    # Material whose z-bound is used to locate the heating line. If omitted/invalid, falls back to first material.
+    material: "p_ins"
+    # Center in the radial (r) direction for the Gaussian
+    center: 0.0
+
+# -------------------------------------------------------------------
+# Boundary conditions at the outer boundary (Dirichlet only)
+# -------------------------------------------------------------------
+boundary_conditions:
+  outer:
+    # Keys under 'outer' are arbitrary names; for each, only type='dirichlet' is used.
+    # value can be a number or the string 'ic_temp' to reuse heating.ic_temp
+    left:
+      type: "dirichlet"
+      value: "ic_temp"
+    right:
+      type: "dirichlet"
+      value: "ic_temp"
+    top:
+      type: "dirichlet"
+      value: "ic_temp"
+    # bottom can be defined similarly if needed
+
+# -------------------------------------------------------------------
+# Solver (PETSc)
+# -------------------------------------------------------------------
+solver:
+  type: "direct"      # only 'direct' is handled
+  direct:
+    factorization: "mumps"  # chosen via PETSc PC LU factor solver type
+
+# -------------------------------------------------------------------
+# Output
+# -------------------------------------------------------------------
+output:
+  xdmf:
+    enabled: true
+    filename: "output.xdmf"    # written in the selected output folder
+  watcher_points:
+    enabled: true
+    filename: "watcher_points.csv"
+    points:
+      # Define any number of watcher points; each requires a 'material' and a 'position'
+      pside:
+        material: "p_ins"
+        # position can be:
+        # - "center"
+        # - "heating_location" (align with heating.bc location/material)
+        # - a list [z, r] of explicit coordinates (in meters)
+        # - a dict with {'r': r_value, 'percentage': p} to place along z within the material
+        position:
+          r: 0.0
+          percentage: 1.0
+      oside:
+        material: "o_ins"
+        position: "center"
+
+# -------------------------------------------------------------------
+# Performance
+# -------------------------------------------------------------------
+performance:
+  visualize_mesh: false         # if true, try to open gmsh viewer for the built mesh
+  progress_reporting:
+    enabled: true               # prints progress every 'interval' percent
+    interval: 10                # percent (1–100); code computes steps from this
+
+# -------------------------------------------------------------------
+# Baseline normalization (used for normalization in engine/plots)
+# -------------------------------------------------------------------
+baseline:
+  use_average: false            # if true, average initial values up to time_window for baseline
+  time_window: 0.0              # [s] averaging window; falls back to first sample if empty
+
+# -------------------------------------------------------------------
+# IO
+# -------------------------------------------------------------------
+io:
+  mesh_path: "meshes/default"   # folder where 'mesh.msh' cache and 'mesh_cfg.yaml' are read/written
+

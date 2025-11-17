@@ -182,20 +182,7 @@ class Mesh:
         if self.mesh is None:
             raise RuntimeError("Mesh not built – call build_mesh() first.")
 
-        from dolfinx.io """
-This module provides the `Mesh` class, which is a wrapper around the `gmsh`
-library for creating and managing the simulation mesh.
-
-The `Mesh` class is responsible for building a 2D mesh of touching rectangles,
-where each rectangle represents a different material. It uses `gmsh`'s Python
-API to define the geometry, assign physical groups for materials, and generate
-the mesh.
-
-The module also provides a `to_dolfinx()` method for converting the `gmsh`
-model into a `dolfinx` mesh, which is the format used by the simulation
-engine.
-"""
-import gmshio  # local import to avoid hard dependency if unused
+        from dolfinx.io import gmshio
         return gmshio.model_to_mesh(gmsh.model, comm, rank, gdim)
     
     @staticmethod
@@ -207,20 +194,7 @@ import gmshio  # local import to avoid hard dependency if unused
         """
         gmsh.initialize()
         gmsh.open(filename)
-        from dolfinx.io """
-This module provides the `Mesh` class, which is a wrapper around the `gmsh`
-library for creating and managing the simulation mesh.
-
-The `Mesh` class is responsible for building a 2D mesh of touching rectangles,
-where each rectangle represents a different material. It uses `gmsh`'s Python
-API to define the geometry, assign physical groups for materials, and generate
-the mesh.
-
-The module also provides a `to_dolfinx()` method for converting the `gmsh`
-model into a `dolfinx` mesh, which is the format used by the simulation
-engine.
-"""
-import gmshio
+        from dolfinx.io import gmshio
         mesh, cell_tags, facet_tags = gmshio.model_to_mesh(gmsh.model, comm, rank, gdim)
         gmsh.finalize()
         return mesh, cell_tags, facet_tags
