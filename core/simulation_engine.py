@@ -116,7 +116,7 @@ class OptimizedSimulationEngine:
             heating_data = self._load_heating_data()
             
             # Setup boundary conditions
-            obj_bcs, bcs = self._setup_boundary_conditions(V, materials, heating_data)
+            obj_bcs, bcs, heating_bc_obj = self._setup_boundary_conditions(V, materials, heating_data)
             
             # Initialize solution
             u_n = fem.Function(V)
@@ -132,7 +132,7 @@ class OptimizedSimulationEngine:
             solver = self._setup_solver(lhs_form, bcs)
             
             # Setup output
-            xdmf_file, watcher_setup = self._setup_output(domain)
+            xdmf_file, watcher_setup = self._setup_output(domain, heating_bc_obj)
             
             # Run time stepping
             timing_results = self._run_time_stepping(
@@ -412,6 +412,11 @@ class OptimizedSimulationEngine:
                 print("Warning: scipy.signal not available, skipping Savitzky-Golay smoothing")
             except Exception as e:
                 print(f"Warning: Error applying Savitzky-Golay smoothing: {e}")
+        else:
+            # Smoothing disabled: df_heat['temp'] contains raw data from CSV
+            # This raw data will be used directly in the heating boundary condition
+            # via linear interpolation (np.interp) in _setup_boundary_conditions()
+            print("Smoothing disabled: using raw experimental data for heating boundary condition")
         
         return df_heat
     
@@ -437,6 +442,9 @@ class OptimizedSimulationEngine:
         
         if bc_cfg.get('type') == 'gaussian':
             # Create heating interpolation function
+            # NOTE: When smoothing.enabled is False, heating_data['temp'] contains raw data
+            #       When smoothing.enabled is True, heating_data['temp'] contains smoothed data
+            #       np.interp() performs linear interpolation onto the simulation time grid
             heating_interp = lambda t: np.interp(
                 t, 
                 heating_data['time'], 
@@ -532,7 +540,17 @@ class OptimizedSimulationEngine:
         # Convert to DOLFINx BC objects
         bcs = [bc.bc for bc in obj_bcs]
         
-        return obj_bcs, bcs
+        # Return heating BC object separately for watcher point setup
+        heating_bc_obj = None
+        if bc_cfg.get('type') == 'gaussian':
+            # The heating BC object is the last one added (after outer BCs)
+            # Find it by checking if it has row_dofs and is a callable BC
+            for bc_obj in reversed(obj_bcs):  # Check from end (heating BC is added last)
+                if hasattr(bc_obj, 'row_dofs') and callable(bc_obj._value_callable):
+                    heating_bc_obj = bc_obj
+                    break
+        
+        return obj_bcs, bcs, heating_bc_obj
     
     def _setup_variational_forms(self, domain, V, Q, kappa, rho_cv, u_n):
         """Setup variational forms for the heat equation."""
@@ -586,8 +604,16 @@ class OptimizedSimulationEngine:
         
         return solver
     
-    def _setup_output(self, domain):
-        """Setup output files and watcher points."""
+    def _setup_output(self, domain, heating_bc_obj=None):
+        """Setup output files and watcher points.
+        
+        Parameters:
+        -----------
+        domain : dolfinx.mesh.Mesh
+            The simulation domain
+        heating_bc_obj : RowDirichletBC, optional
+            The heating boundary condition object (for finding exact boundary DOF)
+        """
         output_cfg = self.cfg.get('output', {})
         
         # Setup XDMF output
@@ -604,12 +630,22 @@ class OptimizedSimulationEngine:
         # Setup watcher points
         watcher_setup = None
         if output_cfg.get('watcher_points', {}).get('enabled', True):
-            watcher_setup = self._setup_watcher_points(domain, output_cfg['watcher_points'])
+            watcher_setup = self._setup_watcher_points(domain, output_cfg['watcher_points'], heating_bc_obj)
         
         return xdmf_file, watcher_setup
     
-    def _setup_watcher_points(self, domain, watcher_cfg):
-        """Setup watcher points for temperature monitoring - agnostic to material names."""
+    def _setup_watcher_points(self, domain, watcher_cfg, heating_bc_obj=None):
+        """Setup watcher points for temperature monitoring - agnostic to material names.
+        
+        Parameters:
+        -----------
+        domain : dolfinx.mesh.Mesh
+            The simulation domain
+        watcher_cfg : dict
+            Watcher points configuration
+        heating_bc_obj : RowDirichletBC, optional
+            The heating boundary condition object (for finding exact boundary DOF)
+        """
         points_cfg = watcher_cfg.get('points', {})
         
         # Calculate watcher point coordinates
@@ -690,18 +726,66 @@ class OptimizedSimulationEngine:
             watcher_coords.append((z_coord, r_coord))
             watcher_names.append(name)
         
-        # Find nearest mesh nodes
+        # Find watcher nodes - use exact boundary DOF for heating_location if available
         mesh_coords = domain.geometry.x[:, :2]
         tree = cKDTree(mesh_coords)
         
         watcher_nodes = []
-        for coords in watcher_coords:
-            distance, node_idx = tree.query(coords)
-            watcher_nodes.append(node_idx)
+        watcher_use_bc_value = []  # Track which watchers should use BC value directly
+        watcher_bc_funcs = []  # Store BC functions for direct value recording
+        
+        for i, (name, coords) in enumerate(zip(watcher_names, watcher_coords)):
+            z_coord, r_coord = coords
+            
+            # Check if this is a heating_location watcher and we have the BC object
+            if (name in points_cfg and 
+                points_cfg[name].get('position') == 'heating_location' and 
+                heating_bc_obj is not None):
+                
+                # Find the exact boundary DOF at r=0 (or closest to r=0)
+                bc_dofs = heating_bc_obj.row_dofs
+                bc_dof_coords = heating_bc_obj.dof_coords[:, :2]  # (z, r) coordinates
+                
+                # Find DOF closest to r=0 (within tolerance)
+                r_tolerance = 1e-8
+                r_distances = np.abs(bc_dof_coords[:, 1] - r_coord)  # r-coordinate differences
+                valid_dofs = np.where(r_distances <= r_tolerance)[0]
+                
+                if len(valid_dofs) > 0:
+                    # Find DOF closest to the target z-coordinate
+                    z_distances = np.abs(bc_dof_coords[valid_dofs, 0] - z_coord)
+                    closest_idx = valid_dofs[np.argmin(z_distances)]
+                    dof_idx = bc_dofs[closest_idx]
+                    
+                    watcher_nodes.append(dof_idx)
+                    watcher_use_bc_value.append(True)
+                    watcher_bc_funcs.append(heating_bc_obj._value_callable)
+                    
+                    # Diagnostic output
+                    dof_coord = bc_dof_coords[closest_idx]
+                    print(f"Watcher '{name}' at heating_location: using exact boundary DOF {dof_idx}")
+                    print(f"  Target: z={z_coord:.6e}, r={r_coord:.6e}")
+                    print(f"  DOF:    z={dof_coord[0]:.6e}, r={dof_coord[1]:.6e}")
+                    print(f"  Distance: z={abs(dof_coord[0]-z_coord):.2e}, r={abs(dof_coord[1]-r_coord):.2e}")
+                else:
+                    # Fallback to nearest mesh node
+                    distance, node_idx = tree.query(coords)
+                    watcher_nodes.append(node_idx)
+                    watcher_use_bc_value.append(False)
+                    watcher_bc_funcs.append(None)
+                    print(f"Watcher '{name}' at heating_location: no boundary DOF found at r={r_coord:.6e}, using nearest node {node_idx}")
+            else:
+                # Standard case: find nearest mesh node
+                distance, node_idx = tree.query(coords)
+                watcher_nodes.append(node_idx)
+                watcher_use_bc_value.append(False)
+                watcher_bc_funcs.append(None)
         
         return {
             'names': watcher_names,
             'nodes': watcher_nodes,
+            'use_bc_value': watcher_use_bc_value,  # Whether to record BC value directly
+            'bc_funcs': watcher_bc_funcs,  # BC functions for direct value recording
             'data': {name: [] for name in watcher_names},
             'time': [],
             'filename': watcher_cfg.get('filename', 'watcher_points.csv')
@@ -760,9 +844,53 @@ class OptimizedSimulationEngine:
             # Record watcher point data
             if watcher_setup:
                 watcher_setup['time'].append(t)
-                for name, node_idx in zip(watcher_setup['names'], watcher_setup['nodes']):
+                for i, (name, node_idx) in enumerate(zip(watcher_setup['names'], watcher_setup['nodes'])):
+                    use_bc_value = watcher_setup.get('use_bc_value', [False] * len(watcher_setup['names']))[i]
+                    bc_func = watcher_setup.get('bc_funcs', [None] * len(watcher_setup['names']))[i]
+                    
+                    # Always record solution value (even for heating_location watchers)
+                    # The solution value at a Dirichlet BC DOF should equal the BC value
                     try:
                         val = u_n.x.array[node_idx]
+                        
+                        # Diagnostic: compare BC value vs solution value for heating_location watchers
+                        if use_bc_value and bc_func is not None and step == 0 and i == 0:
+                            try:
+                                from dolfinx import fem
+                                dof_coords = V.tabulate_dof_coordinates()
+                                dof_coord = dof_coords[node_idx]
+                                z_coord = dof_coord[0]
+                                r_coord = 0.0
+                                bc_val = bc_func(z_coord, r_coord, t)
+                                
+                                # Get experimental data for comparison
+                                heating_data = self._load_heating_data()
+                                exp_times = heating_data['time'].values
+                                exp_temps = heating_data['temp'].values
+                                
+                                # Find closest experimental point
+                                exp_idx = np.argmin(np.abs(exp_times - t))
+                                exp_temp_at_t = exp_temps[exp_idx]
+                                exp_time_at_t = exp_times[exp_idx]
+                                
+                                # Get baseline and offset for comparison
+                                baseline_temp = self._compute_baseline(exp_times, exp_temps)
+                                ic_temp = float(self.cfg['heating']['ic_temp'])
+                                offset = baseline_temp - ic_temp
+                                
+                                print(f"Diagnostic (step {step}, t={t:.6e}):")
+                                print(f"  Solution value:      {val:.6f} K")
+                                print(f"  BC value at r=0:     {bc_val:.6f} K")
+                                print(f"  Difference:          {abs(bc_val - val):.6e} K")
+                                print(f"  Exp temp at t={exp_time_at_t:.6e}: {exp_temp_at_t:.6f} K")
+                                print(f"  Baseline:            {baseline_temp:.6f} K")
+                                print(f"  IC temp:              {ic_temp:.6f} K")
+                                print(f"  Offset:               {offset:.6f} K")
+                                print(f"  BC formula:          exp_temp - offset = {exp_temp_at_t:.6f} - {offset:.6f} = {exp_temp_at_t - offset:.6f} K")
+                                print(f"  Exp max:              {exp_temps.max():.6f} K")
+                                print(f"  Exp min:              {exp_temps.min():.6f} K")
+                            except Exception as e:
+                                print(f"Diagnostic error: {e}")
                     except:
                         val = np.nan
                     watcher_setup['data'][name].append(val)
@@ -855,7 +983,7 @@ class OptimizedSimulationEngine:
                 print("[DEBUG] Heating data loaded.")
                 # Setup boundary conditions
                 print("[DEBUG] Setting up boundary conditions...")
-                obj_bcs, bcs = self._setup_boundary_conditions(V, materials, heating_data)
+                obj_bcs, bcs, heating_bc_obj = self._setup_boundary_conditions(V, materials, heating_data)
                 print("[DEBUG] Boundary conditions set up.")
                 # Initialize solution
                 print("[DEBUG] Initializing solution...")
@@ -875,7 +1003,7 @@ class OptimizedSimulationEngine:
                 print("[DEBUG] Solver set up.")
                 # Setup watcher points only (no XDMF)
                 print("[DEBUG] Setting up watcher points...")
-                watcher_setup = self._setup_watcher_points_minimal(domain)
+                watcher_setup = self._setup_watcher_points_minimal(domain, heating_bc_obj)
                 print("[DEBUG] Watcher points set up.")
                 # Run time stepping
                 print("[DEBUG] Running time stepping...")
@@ -920,14 +1048,14 @@ class OptimizedSimulationEngine:
         
         return domain, cell_tags, materials
 
-    def _setup_watcher_points_minimal(self, domain):
+    def _setup_watcher_points_minimal(self, domain, heating_bc_obj=None):
         """Setup watcher points for minimal run (no file output)."""
         output_cfg = self.cfg.get('output', {})
         
         if not output_cfg.get('watcher_points', {}).get('enabled', True):
             return None
         
-        return self._setup_watcher_points(domain, output_cfg['watcher_points'])
+        return self._setup_watcher_points(domain, output_cfg['watcher_points'], heating_bc_obj)
 
     def _run_time_stepping_minimal(self, domain, V, lhs_form, rhs_form, obj_bcs, bcs, solver, 
                                   u_n, watcher_setup):
@@ -969,7 +1097,12 @@ class OptimizedSimulationEngine:
             # Record watcher point data only
             if watcher_setup:
                 watcher_setup['time'].append(t)
-                for name, node_idx in zip(watcher_setup['names'], watcher_setup['nodes']):
+                for i, (name, node_idx) in enumerate(zip(watcher_setup['names'], watcher_setup['nodes'])):
+                    use_bc_value = watcher_setup.get('use_bc_value', [False] * len(watcher_setup['names']))[i]
+                    bc_func = watcher_setup.get('bc_funcs', [None] * len(watcher_setup['names']))[i]
+                    
+                    # Always record solution value (even for heating_location watchers)
+                    # The solution value at a Dirichlet BC DOF should equal the BC value
                     try:
                         val = u_n.x.array[node_idx]
                     except:

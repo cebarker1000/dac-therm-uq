@@ -7,6 +7,7 @@ Loads samples and creates corner plots for full 11 parameters and κ parameters.
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import pandas as pd
 import seaborn as sns
 from scipy.stats import gaussian_kde
@@ -148,12 +149,25 @@ def analyze_nuisance_parameter_influence(samples_flat, param_names, output_dir):
     dict
         Analysis results including correlations and conditional variances
     """
-    # Identify nuisance and k parameters
-    nuisance_indices = list(range(8))  # First 8 parameters are nuisance
-    k_indices = [8, 9, 10]  # k_sample, k_ins, k_coupler
+    # Identify k parameters dynamically by name
     k_names = ['k_sample', 'k_ins', 'k_coupler']
+    k_indices = []
+    k_names_found = []
+    for k_name in k_names:
+        if k_name in param_names:
+            k_indices.append(param_names.index(k_name))
+            k_names_found.append(k_name)
     
+    if len(k_indices) == 0:
+        print("Warning: No k parameters found in param_names. Skipping nuisance parameter influence analysis.")
+        return {}
+    
+    # Identify nuisance parameters as all non-k parameters
+    nuisance_indices = [i for i in range(len(param_names)) if param_names[i] not in k_names]
     nuisance_names = [param_names[i] for i in nuisance_indices]
+    
+    # Update k_names to only include found parameters
+    k_names = k_names_found
     
     print(f"\n" + "="*60)
     print("NUISANCE PARAMETER INFLUENCE ANALYSIS")
@@ -162,8 +176,10 @@ def analyze_nuisance_parameter_influence(samples_flat, param_names, output_dir):
     # 1. Correlation Analysis
     print("\n1. CORRELATION ANALYSIS")
     print("-" * 40)
-    print(f"{'Nuisance Param':<15} {'k_sample':<12} {'k_ins':<12} {'k_coupler':<12}")
-    print("-" * 60)
+    # Create header dynamically based on found k parameters
+    header = f"{'Nuisance Param':<15} " + " ".join([f"{k:<12}" for k in k_names])
+    print(header)
+    print("-" * (15 + 13 * len(k_names)))
     
     correlations = {}
     for i, nuisance_idx in enumerate(nuisance_indices):
@@ -174,14 +190,17 @@ def analyze_nuisance_parameter_influence(samples_flat, param_names, output_dir):
             corr = np.corrcoef(nuisance_param, k_param)[0, 1]
             corr_row.append(corr)
         correlations[nuisance_names[i]] = corr_row
-        print(f"{nuisance_names[i]:<15} {corr_row[0]:<12.3f} {corr_row[1]:<12.3f} {corr_row[2]:<12.3f}")
+        # Print row dynamically
+        corr_str = " ".join([f"{c:<12.3f}" for c in corr_row])
+        print(f"{nuisance_names[i]:<15} {corr_str}")
     
     # 2. Conditional Variance Analysis
     print("\n2. CONDITIONAL VARIANCE ANALYSIS")
     print("-" * 40)
     print("Variance reduction when nuisance parameter is fixed at its mean")
-    print(f"{'Nuisance Param':<15} {'k_sample':<12} {'k_ins':<12} {'k_coupler':<12}")
-    print("-" * 60)
+    header = f"{'Nuisance Param':<15} " + " ".join([f"{k:<12}" for k in k_names])
+    print(header)
+    print("-" * (15 + 13 * len(k_names)))
     
     # Calculate unconditional variances
     unconditional_var = np.array([np.var(samples_flat[:, k_idx]) for k_idx in k_indices])
@@ -200,10 +219,13 @@ def analyze_nuisance_parameter_influence(samples_flat, param_names, output_dir):
             conditional_var = np.array([np.var(samples_flat[mask, k_idx]) for k_idx in k_indices])
             var_reduction = (unconditional_var - conditional_var) / unconditional_var * 100
             conditional_var_reduction[nuisance_names[i]] = var_reduction
-            print(f"{nuisance_names[i]:<15} {var_reduction[0]:<12.1f}% {var_reduction[1]:<12.1f}% {var_reduction[2]:<12.1f}%")
+            # Print row dynamically
+            var_str = " ".join([f"{v:<12.1f}%" for v in var_reduction])
+            print(f"{nuisance_names[i]:<15} {var_str}")
         else:
-            conditional_var_reduction[nuisance_names[i]] = [0, 0, 0]
-            print(f"{nuisance_names[i]:<15} {'insufficient':<12} {'insufficient':<12} {'insufficient':<12}")
+            conditional_var_reduction[nuisance_names[i]] = [0] * len(k_indices)
+            var_str = " ".join([f"{'insufficient':<12}" for _ in k_indices])
+            print(f"{nuisance_names[i]:<15} {var_str}")
     
     # 3. Create visualization
     plot_nuisance_influence_analysis(correlations, conditional_var_reduction, nuisance_names, k_names, output_dir)
@@ -268,7 +290,6 @@ def plot_nuisance_influence_analysis(correlations, conditional_var_reduction, nu
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "nuisance_parameter_influence.png"), dpi=300, bbox_inches="tight")
     print(f"Nuisance parameter influence analysis saved to {os.path.join(output_dir, 'nuisance_parameter_influence.png')}")
-    plt.show()
     
     # Print summary of correlation and variance reduction
     print("\n3. SUMMARY OF NUISANCE PARAMETER INFLUENCE")
@@ -289,6 +310,151 @@ def plot_nuisance_influence_analysis(correlations, conditional_var_reduction, nu
     for i, idx in enumerate(sorted_indices_var):
         print(f"{i+1}. {nuisance_names[idx]}: avg var reduction = {avg_var_reduction[idx]:.1f}%")
 
+def plot_k_parameter_correlations(samples_flat, param_names, output_dir):
+    """
+    Plot correlation matrix and scatter plots for k parameters (k_sample, k_ins, k_coupler).
+    
+    Parameters
+    ----------
+    samples_flat : np.ndarray
+        Flattened samples (n_samples, n_parameters)
+    param_names : list
+        Names of all parameters
+    output_dir : str
+        Output directory for plots
+    """
+    # Find k parameter indices
+    k_names_all = ['k_sample', 'k_ins', 'k_coupler']
+    k_indices = []
+    k_names = []
+    for k_name in k_names_all:
+        if k_name in param_names:
+            k_indices.append(param_names.index(k_name))
+            k_names.append(k_name)
+    
+    if len(k_indices) < 2:
+        print("Warning: Need at least 2 k parameters for correlation analysis. Skipping k parameter correlation plot.")
+        return
+    
+    # Extract k parameter samples
+    k_samples = samples_flat[:, k_indices]
+    
+    # Compute correlation matrix
+    corr_matrix = np.corrcoef(k_samples.T)
+    
+    # Determine number of scatter plots needed (n choose 2)
+    n_pairs = len(k_names) * (len(k_names) - 1) // 2
+    
+    # Create figure with subplots: heatmap + scatter plots
+    # Layout: 2 rows, first row has heatmap (left) and scatter plots (right), second row has summary
+    fig = plt.figure(figsize=(16, 10))
+    gs = gridspec.GridSpec(2, max(3, n_pairs + 1), figure=fig, hspace=0.4, wspace=0.4)
+    
+    # 1. Correlation heatmap (left side, spans 2 rows)
+    ax_heatmap = fig.add_subplot(gs[:, 0])
+    im = ax_heatmap.imshow(corr_matrix, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+    ax_heatmap.set_title('Correlation Matrix: k Parameters', fontsize=14, fontweight='bold')
+    ax_heatmap.set_xticks(range(len(k_names)))
+    ax_heatmap.set_xticklabels(k_names, rotation=45, ha='right')
+    ax_heatmap.set_yticks(range(len(k_names)))
+    ax_heatmap.set_yticklabels(k_names)
+    plt.colorbar(im, ax=ax_heatmap, label='Correlation')
+    
+    # Add correlation values as text
+    for i in range(len(k_names)):
+        for j in range(len(k_names)):
+            corr_val = corr_matrix[i, j]
+            color = 'white' if abs(corr_val) > 0.5 else 'black'
+            text = ax_heatmap.text(j, i, f'{corr_val:.3f}',
+                                 ha="center", va="center", color=color, 
+                                 fontsize=12, fontweight='bold')
+    
+    # 2. Scatter plots for each pair (top row, right side)
+    plot_idx = 0
+    for i in range(len(k_names)):
+        for j in range(i+1, len(k_names)):
+            if plot_idx < max(3, n_pairs):
+                ax = fig.add_subplot(gs[0, plot_idx + 1])
+                
+                # Create scatter plot
+                scatter = ax.scatter(k_samples[:, i], k_samples[:, j], 
+                                    alpha=0.5, s=10, c=range(len(k_samples)), 
+                                    cmap='viridis')
+                ax.set_xlabel(k_names[i])
+                ax.set_ylabel(k_names[j])
+                ax.set_title(f'{k_names[i]} vs {k_names[j]}\n(corr = {corr_matrix[i, j]:.3f})')
+                ax.grid(True, alpha=0.3)
+                
+                plot_idx += 1
+    
+    # 3. Summary statistics (bottom row, spans remaining columns)
+    ax_stats = fig.add_subplot(gs[1, 1:])
+    ax_stats.axis('off')
+    
+    # Compute statistics
+    stats_text = "k Parameter Correlation Summary:\n\n"
+    stats_text += f"{'Parameter Pair':<30} {'Correlation':<15} {'Interpretation'}\n"
+    stats_text += "-" * 80 + "\n"
+    
+    for i in range(len(k_names)):
+        for j in range(i+1, len(k_names)):
+            corr = corr_matrix[i, j]
+            if abs(corr) < 0.3:
+                interp = "Weak"
+            elif abs(corr) < 0.7:
+                interp = "Moderate"
+            else:
+                interp = "Strong"
+            
+            if corr > 0:
+                interp += " positive"
+            else:
+                interp += " negative"
+            
+            stats_text += f"{k_names[i]} - {k_names[j]:<20} {corr:>8.3f}        {interp}\n"
+    
+    # Add warnings for strong correlations
+    strong_corrs = []
+    for i in range(len(k_names)):
+        for j in range(i+1, len(k_names)):
+            if abs(corr_matrix[i, j]) > 0.8:
+                strong_corrs.append((k_names[i], k_names[j], corr_matrix[i, j]))
+    
+    if strong_corrs:
+        stats_text += "\n⚠️  WARNING: Strong correlations detected (>0.8):\n"
+        for name1, name2, corr in strong_corrs:
+            stats_text += f"   {name1} - {name2}: {corr:.3f}\n"
+        stats_text += "   These parameters may not be independently identifiable.\n"
+        stats_text += "   Consider reparameterization or more informative priors.\n"
+    
+    ax_stats.text(0.05, 0.95, stats_text, transform=ax_stats.transAxes,
+                 fontsize=10, verticalalignment='top', family='monospace',
+                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.savefig(os.path.join(output_dir, "k_parameter_correlations.png"), dpi=300, bbox_inches="tight")
+    print(f"k parameter correlations plot saved to {os.path.join(output_dir, 'k_parameter_correlations.png')}")
+    plt.close()
+    
+    # Print summary to console
+    print(f"\n" + "="*60)
+    print("k PARAMETER CORRELATIONS")
+    print("="*60)
+    print(f"\nCorrelation matrix:")
+    print(f"{'':<15}", end="")
+    for name in k_names:
+        print(f"{name:>12}", end="")
+    print()
+    for i, name in enumerate(k_names):
+        print(f"{name:<15}", end="")
+        for j in range(len(k_names)):
+            print(f"{corr_matrix[i, j]:>12.3f}", end="")
+        print()
+    
+    if strong_corrs:
+        print(f"\n⚠️  Strong correlations (>0.8) detected:")
+        for name1, name2, corr in strong_corrs:
+            print(f"   {name1} - {name2}: {corr:.3f}")
+
 def plot_posterior_vs_prior(samples_flat, param_names, param_defs, output_dir):
     """
     Plot posterior distributions of nuisance parameters overlaid on their prior distributions.
@@ -305,7 +471,9 @@ def plot_posterior_vs_prior(samples_flat, param_names, param_defs, output_dir):
         Output directory for plots
     """
     # Identify nuisance parameters (first 8)
-    nuisance_indices = list(range(8))
+    # Identify nuisance parameters as all non-k parameters
+    k_names_all = ['k_sample', 'k_ins', 'k_coupler']
+    nuisance_indices = [i for i in range(len(param_names)) if param_names[i] not in k_names_all]
     nuisance_names = [param_names[i] for i in nuisance_indices]
     
     print(f"\n" + "="*60)
@@ -375,7 +543,6 @@ def plot_posterior_vs_prior(samples_flat, param_names, param_defs, output_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "posterior_vs_prior.png"), dpi=300, bbox_inches="tight")
     print(f"Posterior vs prior distributions saved to {os.path.join(output_dir, 'posterior_vs_prior.png')}")
-    plt.show()
     
     # Print summary statistics
     print(f"\nSummary Statistics:")
@@ -428,8 +595,8 @@ def plot_likelihood_values(samples_full, log_pdf_values, param_names, output_dir
     # Convert log-likelihood to likelihood (exponentiate)
     likelihood_values = np.exp(log_pdf_values)
     
-    # Create subplots
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    # Create subplots - now 2x3 to include k_ins plot
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     
     # Plot 1: Likelihood vs sample index
     axes[0, 0].plot(likelihood_values, alpha=0.6, linewidth=0.5)
@@ -446,26 +613,61 @@ def plot_likelihood_values(samples_full, log_pdf_values, param_names, output_dir
     axes[0, 1].grid(True, alpha=0.3)
     
     # Plot 3: Likelihood histogram
-    axes[1, 0].hist(likelihood_values, bins=50, alpha=0.7, edgecolor='black')
-    axes[1, 0].set_title('Distribution of Likelihood Values')
-    axes[1, 0].set_xlabel('Likelihood')
-    axes[1, 0].set_ylabel('Frequency')
-    axes[1, 0].grid(True, alpha=0.3)
+    axes[0, 2].hist(likelihood_values, bins=50, alpha=0.7, edgecolor='black')
+    axes[0, 2].set_title('Distribution of Likelihood Values')
+    axes[0, 2].set_xlabel('Likelihood')
+    axes[0, 2].set_ylabel('Frequency')
+    axes[0, 2].grid(True, alpha=0.3)
     
-    # Plot 4: Likelihood vs k_sample (first k parameter, index 8)
-    k_sample_idx = 8  # k_sample is at index 8
-    scatter = axes[1, 1].scatter(samples_flat[:, k_sample_idx], likelihood_values, 
-                                 c=likelihood_values, cmap='viridis', alpha=0.6, s=10)
-    axes[1, 1].set_title('Likelihood vs k_sample')
-    axes[1, 1].set_xlabel('k_sample')
-    axes[1, 1].set_ylabel('Likelihood')
-    axes[1, 1].grid(True, alpha=0.3)
-    plt.colorbar(scatter, ax=axes[1, 1], label='Likelihood')
+    # Plot 4: Likelihood vs k_sample (first k parameter found)
+    k_sample_idx = None
+    if 'k_sample' in param_names:
+        k_sample_idx = param_names.index('k_sample')
+    elif len([n for n in param_names if n.startswith('k_')]) > 0:
+        # Use first k parameter found
+        k_sample_idx = next(i for i, n in enumerate(param_names) if n.startswith('k_'))
+    
+    if k_sample_idx is not None:
+        scatter = axes[1, 0].scatter(samples_flat[:, k_sample_idx], likelihood_values, 
+                                    c=likelihood_values, cmap='viridis', alpha=0.6, s=10)
+        axes[1, 0].set_title(f'Likelihood vs {param_names[k_sample_idx]}')
+        axes[1, 0].set_xlabel(param_names[k_sample_idx])
+        axes[1, 0].set_ylabel('Likelihood')
+        axes[1, 0].grid(True, alpha=0.3)
+        plt.colorbar(scatter, ax=axes[1, 0], label='Likelihood')
+    else:
+        axes[1, 0].text(0.5, 0.5, 'No k parameters found', ha='center', va='center', transform=axes[1, 0].transAxes)
+        axes[1, 0].set_title('Likelihood vs k parameter')
+    
+    # Plot 5: Likelihood vs k_ins
+    k_ins_idx = None
+    if 'k_ins' in param_names:
+        k_ins_idx = param_names.index('k_ins')
+        scatter = axes[1, 1].scatter(samples_flat[:, k_ins_idx], likelihood_values, 
+                                    c=likelihood_values, cmap='viridis', alpha=0.6, s=10)
+        axes[1, 1].set_title(f'Likelihood vs k_ins')
+        axes[1, 1].set_xlabel('k_ins')
+        axes[1, 1].set_ylabel('Likelihood')
+        axes[1, 1].grid(True, alpha=0.3)
+        plt.colorbar(scatter, ax=axes[1, 1], label='Likelihood')
+        
+        # Also plot log-likelihood vs k_ins for better visibility
+        scatter2 = axes[1, 2].scatter(samples_flat[:, k_ins_idx], log_pdf_values, 
+                           c=log_pdf_values, cmap='viridis', alpha=0.6, s=10)
+        axes[1, 2].set_title(f'Log-Likelihood vs k_ins')
+        axes[1, 2].set_xlabel('k_ins')
+        axes[1, 2].set_ylabel('Log-Likelihood')
+        axes[1, 2].grid(True, alpha=0.3)
+        plt.colorbar(scatter2, ax=axes[1, 2], label='Log-Likelihood')
+    else:
+        axes[1, 1].text(0.5, 0.5, 'k_ins not found', ha='center', va='center', transform=axes[1, 1].transAxes)
+        axes[1, 1].set_title('Likelihood vs k_ins')
+        axes[1, 2].set_visible(False)
     
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "likelihood_analysis.png"), dpi=300, bbox_inches="tight")
     print(f"Likelihood analysis plot saved to {os.path.join(output_dir, 'likelihood_analysis.png')}")
-    plt.show()
+    plt.close()
     
     # Print statistics
     print(f"\nLikelihood Statistics:")
@@ -546,7 +748,6 @@ def create_corner_plot(data, labels, title, filename):
         fig.suptitle(title, fontsize=12, y=0.98)
         fig.savefig(filename, dpi=300, bbox_inches="tight")
         print(f"Corner plot saved to {filename}")
-        plt.show()
         
     except ImportError:
         # Fallback using seaborn
@@ -558,7 +759,6 @@ def create_corner_plot(data, labels, title, filename):
         g.fig.subplots_adjust(top=0.95)
         g.fig.savefig(filename, dpi=300, bbox_inches="tight")
         print(f"Pair plot saved to {filename} (corner library not installed)")
-        plt.show()
 
 def plot_parameter_statistics(samples_full, param_names, output_dir):
     """
@@ -608,7 +808,6 @@ def plot_parameter_statistics(samples_full, param_names, output_dir):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "parameter_statistics.png"), dpi=300, bbox_inches="tight")
     print("Parameter statistics plot saved to parameter_statistics.png")
-    plt.show()
 
 def plot_trace_plots(samples_full, param_names, n_walkers=24, output_dir="."):
     """
@@ -678,7 +877,6 @@ def plot_trace_plots(samples_full, param_names, n_walkers=24, output_dir="."):
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "trace_plots.png"), dpi=300, bbox_inches="tight")
     print(f"Trace plots saved to {os.path.join(output_dir, 'trace_plots.png')}")
-    plt.show()
 
 def main():
     """Main function to load and plot MCMC results."""
@@ -776,12 +974,21 @@ def main():
     print("\nCreating corner plots...")
     
     # κ parameters corner plot (indices 8, 9, 10)
-    k_indices = [8, 9, 10]  # k_sample, k_ins, k_coupler
-    k_names = ['k_sample', 'k_ins', 'k_coupler']
-    k_samples = samples_full[:, k_indices] if len(samples_full.shape) == 2 else samples_full[:, :, k_indices]
-    k_labels = ["k_sample", "k_ins", "k_coupler"]
-    create_corner_plot(k_samples, k_labels, "κ Parameters Posterior", 
-                       os.path.join(args.output, "kappa_corner_plot.png"))
+    # Find k parameters dynamically by name
+    k_names_all = ['k_sample', 'k_ins', 'k_coupler']
+    k_indices = []
+    k_names = []
+    for k_name in k_names_all:
+        if k_name in param_names:
+            k_indices.append(param_names.index(k_name))
+            k_names.append(k_name)
+    if len(k_indices) > 0:
+        k_samples = samples_full[:, k_indices] if len(samples_full.shape) == 2 else samples_full[:, :, k_indices]
+        k_labels = k_names  # Use found k parameter names
+        create_corner_plot(k_samples, k_labels, "κ Parameters Posterior", 
+                           os.path.join(args.output, "kappa_corner_plot.png"))
+    else:
+        print("Warning: No k parameters found. Skipping kappa corner plot.")
     
     # Corner plot with specified parameter indices
     if args.corner_indices is not None:
@@ -803,6 +1010,10 @@ def main():
     
     # Plot posterior vs prior distributions for nuisance parameters
     plot_posterior_vs_prior(samples_flat, param_names, param_defs, args.output)
+    
+    # Plot k parameter correlations
+    print("\nCreating k parameter correlation plots...")
+    plot_k_parameter_correlations(samples_flat, param_names, args.output)
 
     print(f"\nAll plots completed and saved to: {args.output}")
 

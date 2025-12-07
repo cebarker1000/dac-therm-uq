@@ -90,7 +90,7 @@ def setup_paths(cfg: Dict[str, Any], mesh_folder: str = None, output_folder: str
 
 
 def run_simulation(cfg: Dict[str, Any], output_dir: str,
-                  rebuild_mesh: bool = False, suppress_output_flag: bool = False,
+                  rebuild_mesh: bool = True, suppress_output_flag: bool = False,
                   no_plots: bool = False, no_xdmf: bool = False, mesh_vis: bool = False,
                   mesh_dir: Optional[str] = None, experimental_data: Optional[str] = None,
                   config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -104,7 +104,7 @@ def run_simulation(cfg: Dict[str, Any], output_dir: str,
     output_dir : str
         Where to save simulation outputs
     rebuild_mesh : bool, optional
-        Whether to rebuild the mesh and update material tags
+        Whether to rebuild the mesh and update material tags (default: True to avoid cached mesh issues)
     suppress_output_flag : bool, optional
         If True, suppress all print output
     no_plots : bool, optional

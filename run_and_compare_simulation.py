@@ -98,11 +98,121 @@ class SimulationComparer:
     def load_experimental_data(self):
         data = np.genfromtxt(self.experimental_file, delimiter=",", names=True)
         return data["time"], data["temp"], data["oside"]
+    
+    def estimate_variance_from_raw_data(self):
+        """Estimate sensor variance from normalized raw (unsmoothed) experimental data.
+        
+        This computes the variance of the normalized oside data in the baseline region only,
+        where the signal should be constant, so any variation is pure sensor noise.
+        Matching the logic in uqpy_MCMC.py with --estimate-variance-from-raw.
+        
+        Returns:
+        --------
+        float
+            Estimated variance in normalized units
+        """
+        import pandas as pd
+        
+        # Load experimental data
+        data = pd.read_csv(self.experimental_file)
+        oside_data = data["oside"].values
+        times = data["time"].values
+        
+        # Determine which pside data to use for normalization (prefer temp_raw if available)
+        if "temp_raw" in data.columns:
+            temp_data = data["temp_raw"].values  # Use raw (unsmoothed) pside data
+            print("Using temp_raw column for variance estimation")
+        else:
+            temp_data = data["temp"].values  # Use regular temp column
+            print("Warning: temp_raw column not found, using temp column for variance estimation")
+        
+        # Compute baselines
+        baseline_pside = self._compute_baseline(times, temp_data)
+        baseline_oside = self._compute_baseline(times, oside_data)
+        
+        # Compute excursion from raw pside data
+        excursion_pside = (temp_data - baseline_pside).max() - (temp_data - baseline_pside).min()
+        if excursion_pside <= 0.0:
+            raise ValueError("Temp excursion is zero – check experimental data")
+        
+        # Normalize oside data using raw pside excursion
+        y_obs_raw = (oside_data - baseline_oside) / excursion_pside
+        
+        # Get baseline time window from config
+        baseline_cfg = self.config.get('baseline', {})
+        use_avg = bool(baseline_cfg.get('use_average', False))
+        
+        if use_avg:
+            t_window = float(baseline_cfg.get('time_window', 0.0))
+            # Filter to baseline region only
+            baseline_mask = times <= t_window
+            if baseline_mask.any():
+                y_obs_baseline = y_obs_raw[baseline_mask]
+                variance = np.var(y_obs_baseline, ddof=1)  # Use ddof=1 for sample variance
+                sigma = np.sqrt(variance)
+                mean_baseline = np.mean(y_obs_baseline)
+                
+                # Diagnostic: check how many baseline points fall within ±1σ
+                within_1sigma = np.sum(np.abs(y_obs_baseline - mean_baseline) <= sigma)
+                within_2sigma = np.sum(np.abs(y_obs_baseline - mean_baseline) <= 2*sigma)
+                pct_1sigma = 100 * within_1sigma / len(y_obs_baseline)
+                pct_2sigma = 100 * within_2sigma / len(y_obs_baseline)
+                
+                print(f"Variance estimation from raw experimental data (baseline region only):")
+                print(f"  Baseline time window: {t_window:.6e} s")
+                print(f"  Number of baseline points: {len(y_obs_baseline)}")
+                print(f"  Baseline mean: {mean_baseline:.6e}")
+                print(f"  Baseline range: [{y_obs_baseline.min():.6e}, {y_obs_baseline.max():.6e}]")
+                print(f"  Baseline span: {y_obs_baseline.max() - y_obs_baseline.min():.6e}")
+                print(f"  Estimated variance (normalized units): {variance:.6e}")
+                print(f"  Standard deviation (normalized units): {sigma:.6e}")
+                print(f"  Points within ±1σ: {within_1sigma}/{len(y_obs_baseline)} ({pct_1sigma:.1f}%)")
+                print(f"  Points within ±2σ: {within_2sigma}/{len(y_obs_baseline)} ({pct_2sigma:.1f}%)")
+                print(f"  Expected for normal distribution: ~68% within ±1σ, ~95% within ±2σ")
+                
+                # Warn if coverage is too low
+                if pct_1sigma < 50:
+                    print(f"  ⚠️  WARNING: Only {pct_1sigma:.1f}% of baseline points within ±1σ")
+                    print(f"     This suggests variance may be underestimated or distribution is non-normal")
+                
+                return variance
+            else:
+                print("Warning: No points in baseline time window, using first point only")
+                variance = 0.0  # Can't estimate from single point
+        else:
+            # If not using average, baseline is just first point - can't estimate variance
+            print("Warning: Baseline uses first point only, cannot estimate variance from baseline")
+            print("  Using variance of entire time series (may overestimate)")
+            variance = np.var(y_obs_raw, ddof=1)
+        
+        print(f"Variance estimation from raw experimental data:")
+        print(f"  Estimated variance (normalized units): {variance:.6e}")
+        print(f"  Standard deviation (normalized units): {np.sqrt(variance):.6e}")
+        
+        return variance
 
     def align_experimental_data(self, exp_time, exp_data, method="linear"):
         f = interp1d(exp_time, exp_data, kind=method, bounds_error=False,
                      fill_value=(exp_data[0], exp_data[-1]))
         return f(self.sim_time_grid)
+
+    def _compute_baseline(self, time_series: np.ndarray, temp_series: np.ndarray) -> float:
+        """Compute baseline temperature using either the first data point or an
+        average over an initial time window, matching simulation_engine._compute_baseline.
+        
+        This ensures consistent baseline calculation across all scripts.
+        """
+        baseline_cfg = self.config.get('baseline', {})
+        use_avg = bool(baseline_cfg.get('use_average', False))
+        if not use_avg:
+            return float(temp_series[0])
+
+        t_window = float(baseline_cfg.get('time_window', 0.0))
+        mask = time_series <= t_window
+        if mask.any():
+            return float(np.mean(temp_series[mask]))
+        # Fallback – no points in window.
+        return float(temp_series[0])
 
     # ------------------------------------------------------------------
     # Plotting
@@ -124,40 +234,91 @@ class SimulationComparer:
         norm_sim = sim_curve
         norm_surr = surrogate_curve
 
-        aligned_oside = self.align_experimental_data(exp_time, exp_oside)
-        pside_exc_exp = np.max(exp_temp) - np.min(exp_temp)
-        norm_exp = (aligned_oside - aligned_oside[0]) / pside_exc_exp
+        # Normalize experimental data using the same baseline averaging logic as simulations
+        # Step 1: Compute baselines from original experimental data (before interpolation)
+        baseline_pside = self._compute_baseline(exp_time, exp_temp)
+        baseline_oside = self._compute_baseline(exp_time, exp_oside)
+        
+        # Step 2: Compute p-side excursion after baseline removal
+        pside_shifted = exp_temp - baseline_pside
+        pside_exc_exp = pside_shifted.max() - pside_shifted.min()
+        if pside_exc_exp <= 0:
+            raise ValueError("P-side excursion is zero after baseline removal – check experimental data")
+        
+        # Step 3: Normalize o-side: subtract its own baseline, divide by p-side excursion
+        # (matching the normalization logic in simulation_engine.py)
+        exp_oside_normalized = (exp_oside - baseline_oside) / pside_exc_exp
 
-        # Compute RMSE in their own normalisation space is tricky; use simulation scale for error
-        rmse_sim = np.sqrt(np.mean((norm_sim - norm_surr) ** 2))
-        rmse_sur = np.sqrt(np.mean((norm_exp - norm_surr) ** 2))
+        # Step 4: Interpolate simulation and surrogate onto experimental time grid
+        # (matching MCMC approach: restrict to overlapping region)
+        t_min = max(sim_time.min(), exp_time.min(), self.sim_time_grid.min())
+        t_max = min(sim_time.max(), exp_time.max(), self.sim_time_grid.max())
+        overlap_mask = (exp_time >= t_min) & (exp_time <= t_max)
+        exp_time_overlap = exp_time[overlap_mask]
+        exp_oside_overlap = exp_oside_normalized[overlap_mask]
+        
+        # Interpolate simulation onto experimental grid
+        sim_interp_func = interp1d(sim_time, norm_sim, kind='linear', 
+                                   bounds_error=False, fill_value=np.nan)
+        norm_sim_on_exp = sim_interp_func(exp_time_overlap)
+        
+        # Interpolate surrogate onto experimental grid
+        surr_interp_func = interp1d(self.sim_time_grid, norm_surr, kind='linear',
+                                    bounds_error=False, fill_value=np.nan)
+        norm_surr_on_exp = surr_interp_func(exp_time_overlap)
+        
+        # Interpolate uncertainty if provided
+        if curve_uncert is not None:
+            uncert_interp_func = interp1d(self.sim_time_grid, curve_uncert, kind='linear',
+                                         bounds_error=False, fill_value=np.nan)
+            curve_uncert_on_exp = uncert_interp_func(exp_time_overlap)
+        else:
+            curve_uncert_on_exp = None
+
+        # Estimate variance from raw experimental data (matching MCMC logic)
+        variance = self.estimate_variance_from_raw_data()
+        sigma = np.sqrt(variance)
+        
+        # Compute ±1 sigma bands around experimental data (on experimental grid)
+        exp_upper = exp_oside_overlap + sigma
+        exp_lower = exp_oside_overlap - sigma
+
+        # Compute RMSE on experimental grid (overlapping region)
+        rmse_sim = np.sqrt(np.mean((norm_sim_on_exp - exp_oside_overlap) ** 2))
+        rmse_sur = np.sqrt(np.mean((norm_surr_on_exp - exp_oside_overlap) ** 2))
 
         plt.figure(figsize=(8, 5))
-        plt.plot(sim_time, norm_sim, label="2-D Simulation (sim-scale)", lw=2)
-        plt.plot(self.sim_time_grid, norm_surr, "r--", label="Surrogate (sim-scale)", lw=2)
-        plt.plot(self.sim_time_grid, norm_exp, "g", label="Experimental (exp-scale)", lw=2)
-        plt.title("Normalized Comparison")
+        plt.plot(exp_time_overlap, norm_sim_on_exp, label="2-D Simulation (interp to exp grid)", lw=2)
+        plt.plot(exp_time_overlap, norm_surr_on_exp, "r--", label="Surrogate (interp to exp grid)", lw=2)
+        plt.scatter(exp_time_overlap, exp_oside_overlap, c='green', s=20, alpha=0.7, 
+                   label='Experimental (raw)', zorder=5)
+        
+        # Plot ±1 sigma bands
+        plt.fill_between(exp_time_overlap, exp_lower, exp_upper, 
+                        alpha=0.2, color='green', label=f'±1σ (σ={sigma:.4f})')
+        plt.title("Normalized Comparison (on Experimental Time Grid)")
         plt.xlabel("Time (s)")
         plt.ylabel("Normalized Temperature")
         plt.legend()
         plt.grid(alpha=0.3)
-        plt.tight_layout()
-
+        
         # --- uncertainty band -------------------------------------------------
-        if curve_uncert is not None:
+        if curve_uncert_on_exp is not None:
             # Shade ±2σ around the surrogate mean
-            upper = norm_surr + 2 * curve_uncert
-            lower = norm_surr - 2 * curve_uncert
-            plt.fill_between(self.sim_time_grid, lower, upper, color="r", alpha=0.2,
+            upper = norm_surr_on_exp + 2 * curve_uncert_on_exp
+            lower = norm_surr_on_exp - 2 * curve_uncert_on_exp
+            plt.fill_between(exp_time_overlap, lower, upper, color="r", alpha=0.2,
                              label="Surrogate ±2σ")
 
             # Mark point of maximum σ for quick visual cue
-            idx_max = int(np.argmax(curve_uncert))
-            plt.scatter(self.sim_time_grid[idx_max], norm_surr[idx_max], color="k", zorder=5)
-            plt.text(self.sim_time_grid[idx_max], norm_surr[idx_max],
-                     f"  max σ={curve_uncert[idx_max]:.3f}",
+            idx_max = int(np.argmax(curve_uncert_on_exp))
+            plt.scatter(exp_time_overlap[idx_max], norm_surr_on_exp[idx_max], color="k", zorder=5)
+            plt.text(exp_time_overlap[idx_max], norm_surr_on_exp[idx_max],
+                     f"  max σ={curve_uncert_on_exp[idx_max]:.3f}",
                      va="bottom", ha="left", fontsize=8)
 
+        plt.tight_layout()
+        
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
         
@@ -166,6 +327,8 @@ class SimulationComparer:
         out = os.path.join(output_dir, f"comparison_{config_basename}.png")
         plt.savefig(out, dpi=200)
         print(f"Comparison plot saved to {out}\nRMSE Sim={rmse_sim:.4f} | Surrogate={rmse_sur:.4f}")
+        print(f"Overlapping region: [{t_min:.6e}, {t_max:.6e}] s ({len(exp_time_overlap)} points)")
+        plt.close()
 
 # -----------------------------------------------------------------------------
 # Simple CLI to reproduce original behaviour for one config
